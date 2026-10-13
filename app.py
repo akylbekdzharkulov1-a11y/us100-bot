@@ -1,3 +1,4 @@
+import os
 from flask import Flask
 import yfinance as yf
 import requests
@@ -7,8 +8,8 @@ from datetime import datetime
 
 app = Flask(__name__)
 
-TELEGRAM_TOKEN = "123456:ABC"
-CHAT_ID = "123456789"
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+CHAT_ID = "@xauusdakyl"
 TICKER = "^NDX"
 
 def send_telegram(text):
@@ -31,10 +32,10 @@ def check_us100():
             rsi = 100 - (100 / (1 + rs))
             price = close.iloc[-1]
             signal = ""
-            if ema9 > ema21 and rsi < 70 and rsi > 50:
-                signal = f"🟢 US100 BUY {price:.2f} RSI:{rsi:.1f}"
-            elif ema9 < ema21 and rsi > 30 and rsi < 50:
-                signal = f"🔴 US100 SELL {price:.2f} RSI:{rsi:.1f}"
+            if ema9 > ema21 and float(rsi) < 70 and float(rsi) > 50:
+                signal = f"🟢 US100 BUY {float(price):.2f} RSI:{float(rsi):.1f}"
+            elif ema9 < ema21 and float(rsi) > 30 and float(rsi) < 50:
+                signal = f"🔴 US100 SELL {float(price):.2f} RSI:{float(rsi):.1f}"
             if signal:
                 send_telegram(signal)
         except Exception as e:
@@ -43,7 +44,7 @@ def check_us100():
 
 @app.route('/')
 def home():
-    return f"US100 Bot Live! {datetime.now()}"
+    return f"US100 Bot Live -> @xauusdakyl {datetime.now()}"
 
 threading.Thread(target=check_us100, daemon=True).start()
 
