@@ -1,59 +1,64 @@
-import os, time, threading, requests
+import os, time, threading, requests, math
 from flask import Flask
+from datetime import datetime
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = "@xauusdakyl"
-
 app = Flask(__name__)
 
 def send_telegram(text):
-    if not TELEGRAM_TOKEN:
-        print("NO TOKEN!")
-        return
     try:
+        if not TELEGRAM_TOKEN: return
         r = requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-            data={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=10)
-        print(f"Telegram send: {r.status_code} {r.text[:200]}")
+            data={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown", "disable_web_page_preview": True}, timeout=15)
+        print(f"TG {r.status_code}")
     except Exception as e:
-        print(f"Telegram error: {e}")
+        print(f"TG err {e}")
 
-def get_price():
-    # Прямой запрос без yfinance - обходит 429
+def get_history():
+    """Yahoo Chart API - 429 болбойт"""
     try:
-        url = "https://query1.finance.yahoo.com/v8/finance/chart/%5ENDX?interval=5m&range=1d"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        r = requests.get(url, headers=headers, timeout=10)
-        data = r.json()
-        price = data['chart']['result'][0]['meta']['regularMarketPrice']
-        return float(price)
+        # 5m candles, 5 days
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/%5ENDX?interval=5m&range=5d"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        r = requests.get(url, headers=headers, timeout=15)
+        j = r.json()['chart']['result'][0]
+        closes = j['indicators']['quote'][0]['close']
+        # тазалоо
+        closes = [c for c in closes if c is not None]
+        return closes
     except Exception as e:
-        print(f"Price error: {e}")
+        print(f"History err {e}")
         return None
 
-def bot_loop():
-    print("Bot loop started")
-    send_telegram("✅ US100 Bot иштеп баштады! @xauusdakyl")
-    while True:
-        price = get_price()
-        print(f"Price check: {price}")
-        if price:
-            # Простой сигнал для теста - каждую проверку шлем
-            # Потом заменишь на свою логику
-            if int(time.time()) % 900 < 60: # каждые 15 мин
-                msg = f"📊 *US100 (NAS100)*\n💰 Баа: `{price:.2f}`\n\n⚠️ Тест сигнал - бот иштеп жатат!\n\n@xauusdakyl"
-                send_telegram(msg)
-        time.sleep(60)
+def calc_ema(data, period):
+    if len(data) < period: return None
+    k = 2/(period+1)
+    ema = sum(data[:period])/period
+    for price in data[period:]:
+        ema = price*k + ema*(1-k)
+    return ema
 
-threading.Thread(target=bot_loop, daemon=True).start()
+def calc_rsi(data, period=14):
+    if len(data) < period+1: return 50
+    gains=losses=0
+    for i in range(1, period+1):
+        diff = data[-i] - data[-i-1]
+        if diff>0: gains+=diff
+        else: losses-=diff
+    if losses==0: return 100
+    rs = gains/losses
+    return 100 - (100/(1+rs))
 
-@app.route('/')
-def home():
-    return f"US100 Bot Live -> {CHAT_ID} {time.ctime()} Price: {get_price()}"
+def analyze():
+    closes = get_history()
+    if not closes or len(closes) < 200:
+        return None
 
-@app.route('/test')
-def test():
-    send_telegram("🚀 TEST: US100 bot @xauusdakyl каналына туташты! Баа: " + str(get_price()))
-    return "Test sent to channel!"
+    price = closes[-1]
+    ema50 = calc_ema(closes, 50)
+    ema200 = calc_ema(closes, 200)
+    rsi = calc_rsi(closes, 14)
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+    # ATR үчүн
+    atr = sum(abs(closes[i]-closes[i-1]) for i
