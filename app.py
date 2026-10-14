@@ -1,52 +1,59 @@
-import os
+import os, time, threading, requests
 from flask import Flask
-import yfinance as yf
-import requests
-import time
-import threading
-from datetime import datetime
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = "@xauusdakyl"
 
 app = Flask(__name__)
 
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHAT_ID = "@xauusdakyl"
-TICKER = "^NDX"
-
 def send_telegram(text):
+    if not TELEGRAM_TOKEN:
+        print("NO TOKEN!")
+        return
     try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"})
-    except: pass
+        r = requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+            data={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=10)
+        print(f"Telegram send: {r.status_code} {r.text[:200]}")
+    except Exception as e:
+        print(f"Telegram error: {e}")
 
-def check_us100():
+def get_price():
+    # Прямой запрос без yfinance - обходит 429
+    try:
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/%5ENDX?interval=5m&range=1d"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, headers=headers, timeout=10)
+        data = r.json()
+        price = data['chart']['result'][0]['meta']['regularMarketPrice']
+        return float(price)
+    except Exception as e:
+        print(f"Price error: {e}")
+        return None
+
+def bot_loop():
+    print("Bot loop started")
+    send_telegram("✅ US100 Bot иштеп баштады! @xauusdakyl")
     while True:
-        try:
-            data = yf.download(TICKER, period="2d", interval="15m")
-            close = data['Close']
-            ema9 = close.ewm(span=9).mean().iloc[-1]
-            ema21 = close.ewm(span=21).mean().iloc[-1]
-            delta = close.diff()
-            gain = (delta.where(delta > 0, 0)).rolling(14).mean().iloc[-1]
-            loss = (-delta.where(delta < 0, 0)).rolling(14).mean().iloc[-1]
-            rs = gain / loss if loss != 0 else 0
-            rsi = 100 - (100 / (1 + rs))
-            price = close.iloc[-1]
-            signal = ""
-            if ema9 > ema21 and float(rsi) < 70 and float(rsi) > 50:
-                signal = f"🟢 US100 BUY {float(price):.2f} RSI:{float(rsi):.1f}"
-            elif ema9 < ema21 and float(rsi) > 30 and float(rsi) < 50:
-                signal = f"🔴 US100 SELL {float(price):.2f} RSI:{float(rsi):.1f}"
-            if signal:
-                send_telegram(signal)
-        except Exception as e:
-            print(e)
-        time.sleep(900)
+        price = get_price()
+        print(f"Price check: {price}")
+        if price:
+            # Простой сигнал для теста - каждую проверку шлем
+            # Потом заменишь на свою логику
+            if int(time.time()) % 900 < 60: # каждые 15 мин
+                msg = f"📊 *US100 (NAS100)*\n💰 Баа: `{price:.2f}`\n\n⚠️ Тест сигнал - бот иштеп жатат!\n\n@xauusdakyl"
+                send_telegram(msg)
+        time.sleep(60)
+
+threading.Thread(target=bot_loop, daemon=True).start()
 
 @app.route('/')
 def home():
-    return f"US100 Bot Live -> @xauusdakyl {datetime.now()}"
+    return f"US100 Bot Live -> {CHAT_ID} {time.ctime()} Price: {get_price()}"
 
-threading.Thread(target=check_us100, daemon=True).start()
+@app.route('/test')
+def test():
+    send_telegram("🚀 TEST: US100 bot @xauusdakyl каналына туташты! Баа: " + str(get_price()))
+    return "Test sent to channel!"
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=10000)
